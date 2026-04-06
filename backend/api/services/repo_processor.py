@@ -72,4 +72,4 @@ def retrieve_relevant_chunks(query, top_k=5):
         n_results=top_k
     )
 
-    return results["documents"]
+    return results["documents"][0]
