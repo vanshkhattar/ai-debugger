@@ -17,22 +17,36 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-
-# ================= BACKEND (IMPORTANT) =================
+# ================= BACKEND =================
 
 # Python
 venv/
 __pycache__/
 *.pyc
 
+# Django
+*.log
+staticfiles/
+media/
+
 # Database
 db.sqlite3
 
 # Env
 .env
+.env.*
+
+# Migrations cache
+*/migrations/*.pyc
+*/migrations/__pycache__/
 
 # VS Code
 .vscode/
 
+# JetBrains
+.idea/
+
 # OS
 Thumbs.db
+.AppleDouble
+.LSOverride
