@@ -1,3 +1,5 @@
+import { getAccessToken } from "./auth";
+import { fetchWithAuth } from "./api";
 import { useState, useRef, useEffect } from "react";
 import {
   Trash2,
@@ -10,9 +12,7 @@ import Login from "./Login";
 export default function App() {
 
   const [isLoggedIn, setIsLoggedIn] = useState(
-    !!localStorage.getItem("token") ||
-    !!sessionStorage.getItem("token") ||
-    !!localStorage.getItem("guest")
+    !!localStorage.getItem("token")
   );
 
   const [query, setQuery] = useState("");
@@ -22,20 +22,37 @@ export default function App() {
   const [search, setSearch] = useState("");
 
   const [editingChatId, setEditingChatId] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
 
   const scrollRef = useRef(null);
+
+  const token = getAccessToken();
 
   const activeChat = chats.find(c => c.id === activeChatId);
   const messages = activeChat?.messages || [];
 
-  // INIT
+  // ================= LOAD CHATS =================
   useEffect(() => {
-    const newChat = { id: Date.now(), title: "New Chat", messages: [] };
-    setChats([newChat]);
-    setActiveChatId(newChat.id);
+    if (!token) return;
+
+    fetchWithAuth("http://127.0.0.1:8000/api/chats/", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.length > 0) {
+          setChats(data);
+          setActiveChatId(data[0].id);
+        } else {
+          createNewChat();
+        }
+      });
   }, []);
 
-  // AUTO SCROLL
+  // ================= AUTO SCROLL =================
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
@@ -43,37 +60,77 @@ export default function App() {
     });
   }, [messages]);
 
-  // FILTER + SORT
+  // ================= FILTER =================
   const filteredChats = chats
     .filter(c => c.title.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => Number(b.pinned) - Number(a.pinned));
 
-  // ASK AI (STREAMING)
+  // ================= NEW CHAT =================
+  const createNewChat = () => {
+    const newChat = {
+      id: Date.now(),
+      title: "New Chat",
+      messages: [],
+    };
+    setChats(prev => [newChat, ...prev]);
+    setActiveChatId(newChat.id);
+    setHasStartedChat(false);
+  };
+
+  // ================= SAVE CHAT =================
+  const saveChatToBackend = async (chat) => {
+    if (!token) return;
+
+    await fetchWithAuth("http://127.0.0.1:8000/api/chats/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(chat),
+    });
+  };
+
+  // ================= ASK AI =================
   const askAI = async () => {
     if (!query.trim()) return;
 
     setHasStartedChat(true);
+    setLoading(true);
 
     const userMessage = { role: "user", text: query };
 
+    let updatedChat;
+
+    setChats(prev =>
+      prev.map(c => {
+        if (c.id === activeChatId) {
+          updatedChat = {
+            ...c,
+            messages: [...c.messages, userMessage],
+            title: c.messages.length === 0 ? query.slice(0, 20) : c.title,
+          };
+          return updatedChat;
+        }
+        return c;
+      })
+    );
+
+    setQuery("");
+
+    // Add thinking message
     setChats(prev =>
       prev.map(c =>
         c.id === activeChatId
           ? {
               ...c,
-              messages: [...c.messages, userMessage],
-              title:
-                c.messages.length === 0
-                  ? query.slice(0, 20)
-                  : c.title,
+              messages: [...c.messages, { role: "ai", text: "Thinking..." }],
             }
           : c
       )
     );
 
-    setQuery("");
-
-    const res = await fetch("http://127.0.0.1:8000/api/ask/", {
+    const res = await fetchWithAuth("http://127.0.0.1:8000/api/chats/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
@@ -82,37 +139,48 @@ export default function App() {
     const reader = res.body.getReader();
     let aiText = "";
 
-    // Add empty AI message
-    setChats(prev =>
-      prev.map(c =>
-        c.id === activeChatId
-          ? { ...c, messages: [...c.messages, { role: "ai", text: "" }] }
-          : c
-      )
-    );
+    setIsStreaming(true);
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
       const chunk = new TextDecoder().decode(value);
-      aiText += chunk;
 
-      setChats(prev =>
-        prev.map(c =>
-          c.id === activeChatId
-            ? {
-                ...c,
-                messages: c.messages.map((m, i) =>
-                  i === c.messages.length - 1
-                    ? { ...m, text: aiText }
-                    : m
-                ),
-              }
-            : c
-        )
-      );
+      for (let char of chunk) {
+        aiText += char;
+
+        setChats(prev =>
+          prev.map(c =>
+            c.id === activeChatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m, i) =>
+                    i === c.messages.length - 1
+                      ? { ...m, text: aiText }
+                      : m
+                  ),
+                }
+              : c
+          )
+        );
+
+        await new Promise(r => setTimeout(r, 5));
+      }
     }
+
+    setIsStreaming(false);
+    setLoading(false);
+
+    // SAVE CHAT
+    const finalChat = chats.find(c => c.id === activeChatId);
+    if (finalChat) saveChatToBackend(finalChat);
+  };
+
+  // ================= LOGOUT =================
+  const logout = () => {
+    localStorage.removeItem("token");
+    setIsLoggedIn(false);
   };
 
   if (!isLoggedIn) return <Login setIsLoggedIn={setIsLoggedIn} />;
@@ -134,16 +202,7 @@ export default function App() {
         />
 
         <button
-          onClick={() => {
-            const newChat = {
-              id: Date.now(),
-              title: "New Chat",
-              messages: [],
-            };
-            setChats(prev => [...prev, newChat]);
-            setActiveChatId(newChat.id);
-            setHasStartedChat(false);
-          }}
+          onClick={createNewChat}
           className="bg-purple-500/20 p-2 rounded mb-3"
         >
           + New Chat
@@ -162,50 +221,18 @@ export default function App() {
             >
               <div className="flex justify-between items-center">
 
-                {editingChatId === chat.id ? (
-                  <input
-                    autoFocus
-                    defaultValue={chat.title}
-                    onBlur={(e) => {
-                      setChats(prev =>
-                        prev.map(c =>
-                          c.id === chat.id
-                            ? { ...c, title: e.target.value }
-                            : c
-                        )
-                      );
-                      setEditingChatId(null);
-                    }}
-                    className="bg-transparent border-b outline-none"
-                  />
-                ) : (
-                  <span
-                    onClick={() => setActiveChatId(chat.id)}
-                    className="truncate cursor-pointer"
-                  >
-                    {chat.title}
-                  </span>
-                )}
+                <span
+                  onClick={() => setActiveChatId(chat.id)}
+                  className="truncate cursor-pointer"
+                >
+                  {chat.title}
+                </span>
 
                 <div className="flex gap-2 opacity-0 group-hover:opacity-100">
 
                   <Star
                     size={14}
                     className={chat.pinned ? "text-yellow-400" : ""}
-                    onClick={() =>
-                      setChats(prev =>
-                        prev.map(c =>
-                          c.id === chat.id
-                            ? { ...c, pinned: !c.pinned }
-                            : c
-                        )
-                      )
-                    }
-                  />
-
-                  <Pencil
-                    size={14}
-                    onClick={() => setEditingChatId(chat.id)}
                   />
 
                   <Trash2
@@ -224,14 +251,7 @@ export default function App() {
           ))}
         </div>
 
-        <button
-          onClick={() => {
-            localStorage.clear();
-            sessionStorage.clear();
-            setIsLoggedIn(false);
-          }}
-          className="text-red-400 mt-3"
-        >
+        <button onClick={logout} className="text-red-400 mt-3">
           Logout
         </button>
 
@@ -279,7 +299,7 @@ export default function App() {
                     className={`max-w-[60%] p-4 rounded-xl ${
                       msg.role === "user"
                         ? "bg-gradient-to-r from-purple-500 to-blue-500"
-                        : "bg-white/5 border"
+                        : "bg-white/5 border border-white/10 backdrop-blur-sm"
                     }`}
                   >
                     {msg.text}

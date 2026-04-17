@@ -1,16 +1,14 @@
 import { useState } from "react";
-import Signup from "./Signup";
 import { setTokens } from "./auth";
 
 
-export default function Login({ setIsLoggedIn }) {
+export default function Signup({ setIsLoggedIn }) {
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [isSignup, setIsSignup] = useState(false);
 
-  const handleLogin = async () => {
-    const res = await fetch("http://127.0.0.1:8000/api/login/", {
+  const signup = async () => {
+    const res = await fetch("http://127.0.0.1:8000/api/signup/", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -21,29 +19,19 @@ export default function Login({ setIsLoggedIn }) {
     const data = await res.json();
 
     if (data.token) {
-      localStorage.setItem("access", data.access);
-      localStorage.setItem("refresh", data.refresh);
+      setTokens(data.access, data.refresh);
       setIsLoggedIn(true);
     } else {
       alert(data.error);
     }
   };
 
-  if (isSignup) {
-    return (
-      <Signup
-        setIsLoggedIn={setIsLoggedIn}
-        setIsSignup={setIsSignup}
-      />
-    );
-  }
-
   return (
     <div className="h-screen flex items-center justify-center bg-[#020617] text-white">
 
       <div className="bg-white/5 border border-white/10 p-8 rounded-2xl w-[350px]">
 
-        <h2 className="text-2xl mb-6 text-center">Login</h2>
+        <h2 className="text-2xl mb-6 text-center">Create Account</h2>
 
         <input
           placeholder="Username"
@@ -61,18 +49,11 @@ export default function Login({ setIsLoggedIn }) {
         />
 
         <button
-          onClick={handleLogin}
+          onClick={signup}
           className="w-full bg-purple-500 py-3 rounded-xl"
         >
-          Login
+          Sign Up
         </button>
-
-        <p
-          className="text-sm mt-4 text-center text-white/60 cursor-pointer"
-          onClick={() => setIsSignup(true)}
-        >
-          Don't have an account? Sign up
-        </p>
 
       </div>
     </div>
